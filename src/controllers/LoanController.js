@@ -1,154 +1,314 @@
-// src/controllers/LoanController.js (CÓDIGO COMPLETO Y FINAL)
-
+// src/controllers/LoanController.js - VERSIÓN COMPLETA CON TODAS LAS FUNCIONALIDADES
 import { useState, useEffect } from 'react';
 import { jsPDF } from 'jspdf';
-import LoanModel from '../models/LoanModel'; 
-import BookModel from '../models/BookModel'; // Incluido por si se requiere en el futuro
+import LoanModel from '../models/LoanModel';
+import BookModel from '../models/BookModel';
 
 // Función utilitaria para filtrar el catálogo
 const filterBookCatalog = (books, searchTerm) => {
-    if (!searchTerm) {
-        return books;
-    }
-    const term = searchTerm.toLowerCase();
-    
-    return books.filter(book => 
-        book.title.toLowerCase().includes(term) || 
-        book.author.toLowerCase().includes(term) ||
-        (book.isbn && book.isbn.includes(term))
-    );
+  if (!searchTerm) {
+    return books;
+  }
+  const term = searchTerm.toLowerCase();
+
+  return books.filter(book =>
+    book.title.toLowerCase().includes(term) ||
+    book.author.toLowerCase().includes(term) ||
+    (book.isbn && book.isbn.includes(term))
+  );
 };
 
 const LoanController = {
-    useLoanManager: () => {
-        const [solicitudes, setSolicitudes] = useState(LoanModel.getSolicitudes());
-        const [concluidos, setConcluidos] = useState(LoanModel.getConcluidos());
-        const [filter, setFilter] = useState('');
+  // Hook para manejar préstamos con Supabase - VERSIÓN COMPLETA
+  useLoanManager: () => {
+    const [solicitudesPendientes, setSolicitudesPendientes] = useState([]);
+    const [solicitudesActivas, setSolicitudesActivas] = useState([]);
+    const [concluidos, setConcluidos] = useState([]);
+    const [filter, setFilter] = useState('');
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
 
-        useEffect(() => { LoanModel.saveSolicitudes(solicitudes); }, [solicitudes]);
-        useEffect(() => { LoanModel.saveConcluidos(concluidos); }, [concluidos]);
+    // Cargar datos al montar el componente
+    useEffect(() => {
+      loadAllData();
+    }, []);
 
-        const addLoan = (nuevo) => {
-            setSolicitudes(prev => [...prev, { ...nuevo, estado: 'pendiente' }]);
-        };
+    const loadAllData = async () => {
+      try {
+        setLoading(true);
+        await Promise.all([
+          loadPendientes(),
+          loadActivas(),
+          loadConcluidos()
+        ]);
+        setError(null);
+      } catch (err) {
+        console.error('Error al cargar datos:', err);
+        setError('Error al cargar los datos');
+      } finally {
+        setLoading(false);
+      }
+    };
 
-        const acceptLoan = (index) => {
-            setSolicitudes(prev => prev.map((p, i) => 
-                i === index ? { ...p, estado: 'aceptado', fecha: new Date().toLocaleDateString() } : p
-            ));
-        };
+    const loadPendientes = async () => {
+      try {
+        const data = await LoanModel.getPendingSolicitudes();
+        setSolicitudesPendientes(data);
+      } catch (err) {
+        console.error('Error al cargar pendientes:', err);
+      }
+    };
 
-        const rejectLoan = (index) => {
-            setSolicitudes(prev => prev.filter((_, i) => i !== index));
-        };
+    const loadActivas = async () => {
+      try {
+        const data = await LoanModel.getSolicitudes();
+        setSolicitudesActivas(data);
+      } catch (err) {
+        console.error('Error al cargar activas:', err);
+      }
+    };
 
-        const concludeLoan = (index) => {
-            const [eliminado] = solicitudes.filter((_, i) => i === index);
-            if (eliminado) {
-                const concluido = { ...eliminado, fecha_conclusion: new Date().toLocaleDateString() };
-                setConcluidos(prev => [...prev, concluido]);
-                setSolicitudes(prev => prev.filter((_, i) => i !== index));
+    const loadConcluidos = async () => {
+      try {
+        const data = await LoanModel.getConcluidos();
+        setConcluidos(data);
+      } catch (err) {
+        console.error('Error al cargar concluidos:', err);
+      }
+    };
+
+    // Agregar nueva solicitud de préstamo
+    const addLoan = async (loanData) => {
+      try {
+        const result = await LoanModel.createLoan(loanData);
+
+        if (!result.success) {
+          setError(result.error || 'Error al crear préstamo');
+          return { success: false, message: result.error };
+        }
+
+        await loadAllData();
+        return { success: true, message: 'Préstamo creado exitosamente' };
+      } catch (err) {
+        console.error('Error al agregar préstamo:', err);
+        setError('Error al crear el préstamo');
+        return { success: false, message: 'Error al crear el préstamo' };
+      }
+    };
+
+    // Aceptar préstamo (pending -> active)
+    const acceptLoan = async (loanId, acceptedBy) => {
+      try {
+        const result = await LoanModel.acceptLoan(loanId, acceptedBy);
+
+        if (!result.success) {
+          setError(result.error || 'Error al aceptar préstamo');
+          return { success: false };
+        }
+
+        await loadAllData();
+        return { success: true, message: 'Préstamo aceptado' };
+      } catch (err) {
+        console.error('Error al aceptar préstamo:', err);
+        setError('Error al aceptar el préstamo');
+        return { success: false };
+      }
+    };
+
+    // Rechazar préstamo (pending -> cancelled)
+    const rejectLoan = async (loanId, rejectedBy) => {
+      try {
+        const result = await LoanModel.rejectLoan(loanId, rejectedBy);
+
+        if (!result.success) {
+          setError(result.error || 'Error al rechazar préstamo');
+          return { success: false };
+        }
+
+        await loadAllData();
+        return { success: true, message: 'Préstamo rechazado' };
+      } catch (err) {
+        console.error('Error al rechazar préstamo:', err);
+        setError('Error al rechazar el préstamo');
+        return { success: false };
+      }
+    };
+
+    // Concluir préstamo (active -> returned)
+    const concludeLoan = async (loanId) => {
+      try {
+        const result = await LoanModel.markAsReturned(loanId);
+
+        if (!result.success) {
+          setError(result.error || 'Error al concluir préstamo');
+          return { success: false };
+        }
+
+        await loadAllData();
+        return { success: true, message: 'Libro devuelto exitosamente' };
+      } catch (err) {
+        console.error('Error al concluir préstamo:', err);
+        setError('Error al concluir el préstamo');
+        return { success: false };
+      }
+    };
+
+    // Editar préstamo
+    const editLoan = async (loanId, updates, editedBy) => {
+      try {
+        const result = await LoanModel.updateLoan(loanId, updates, editedBy);
+
+        if (!result.success) {
+          setError(result.error || 'Error al editar préstamo');
+          return { success: false };
+        }
+
+        await loadAllData();
+        return { success: true, message: 'Préstamo actualizado' };
+      } catch (err) {
+        console.error('Error al editar préstamo:', err);
+        setError('Error al editar el préstamo');
+        return { success: false };
+      }
+    };
+
+    // Combinar pendientes y activas para mostrar en la tabla
+    const allSolicitudes = [...solicitudesPendientes, ...solicitudesActivas];
+
+    // Filtrar solicitudes
+    const filteredSolicitudes = allSolicitudes.filter(p =>
+      (p.userName && p.userName.toLowerCase().includes(filter.toLowerCase())) ||
+      (p.bookTitle && p.bookTitle.toLowerCase().includes(filter.toLowerCase())) ||
+      (p.userEmail && p.userEmail.toLowerCase().includes(filter.toLowerCase()))
+    );
+
+    // Exportar PDF con los datos actuales
+    const exportarPDF = async () => {
+      try {
+        const doc = new jsPDF();
+
+        const lineHeight = 5;
+        const blockHeight = 40;
+        const imageWidth = 25;
+        const imageHeight = 35;
+        const margin = 14;
+
+        let y = 20;
+
+        const solicitudesActivas = allSolicitudes.filter(p => p.status === 'active');
+        const concluidosData = concluidos;
+
+        const generateRecords = (title, data, isConcluded) => {
+          if (y > 270 - 20) {
+            doc.addPage();
+            y = 20;
+          }
+          doc.setFontSize(14);
+          doc.text(title, margin, y);
+          doc.setFontSize(10);
+          y += 10;
+
+          data.forEach((p, idx) => {
+            if (y + blockHeight > 270) {
+              doc.addPage();
+              y = 20;
             }
+
+            try {
+              if (p.bookImg && p.bookImg.startsWith('http')) {
+                doc.addImage(p.bookImg, 'JPEG', margin, y, imageWidth, imageHeight);
+              } else {
+                doc.rect(margin, y, imageWidth, imageHeight);
+                doc.text(`[Sin imagen]`, margin + 3, y + imageHeight / 2);
+              }
+            } catch (e) {
+              doc.rect(margin, y, imageWidth, imageHeight);
+              doc.text(`[Error CORS]`, margin + 2, y + imageHeight / 2);
+            }
+
+            const textX = margin + imageWidth + 5;
+            let textY = y + 5;
+
+            doc.setFontSize(12);
+            doc.text(`${p.bookTitle}`, textX, textY);
+            doc.setFontSize(10);
+            textY += lineHeight * 2;
+
+            doc.text(`Usuario: ${p.userName}`, textX, textY);
+            textY += lineHeight;
+            doc.text(`Email: ${p.userEmail}`, textX, textY);
+            textY += lineHeight;
+            doc.text(`Biblioteca: ${p.libraryName || 'N/A'}`, textX, textY);
+            textY += lineHeight;
+
+            if (isConcluded) {
+              doc.text(`Devuelto: ${p.actualReturnDate || 'N/A'}`, textX, textY);
+              textY += lineHeight;
+            } else {
+              doc.text(`Fecha Préstamo: ${new Date(p.loanDate).toLocaleDateString()}`, textX, textY);
+              textY += lineHeight;
+              doc.text(`Devolución Esperada: ${new Date(p.expectedReturnDate).toLocaleDateString()}`, textX, textY);
+              textY += lineHeight;
+            }
+
+            y += blockHeight + 5;
+          });
         };
 
-        const filteredSolicitudes = solicitudes.filter(p =>
-            p.nombre.toLowerCase().includes(filter.toLowerCase()) ||
-            p.libro.toLowerCase().includes(filter.toLowerCase())
-        );
+        doc.setFontSize(16);
+        doc.text('Historial de Préstamos', margin, 10);
 
-        // IMPLEMENTACIÓN DEL PDF (CON LÓGICA DE DIBUJO DE IMAGEN)
-        const exportarPDF = () => {
-            const doc = new jsPDF();
-            
-            // Parámetros de diseño
-            const lineHeight = 5;
-            const blockHeight = 40; // Altura reservada por cada registro
-            const imageWidth = 25;
-            const imageHeight = 35;
-            const margin = 14;
+        generateRecords('Préstamos Activos', solicitudesActivas, false);
 
-            let y = 20;
-            const solicitudesAceptadas = LoanModel.getSolicitudes().filter(p => p.estado === 'aceptado');
-            const concluidosData = LoanModel.getConcluidos();
+        y += 10;
+        generateRecords('Historial de Préstamos Devueltos', concluidosData, true);
 
-            const generateRecords = (title, data, isConcluded) => {
-                if (y > 270 - 20) { doc.addPage(); y = 20; }
-                doc.setFontSize(14);
-                doc.text(title, margin, y); 
-                doc.setFontSize(10);
-                y += 10;
+        doc.save('historial_prestamos.pdf');
+        return { success: true };
+      } catch (error) {
+        console.error('Error al generar PDF:', error);
+        return { success: false, error: error.message };
+      }
+    };
 
-                data.forEach((p, idx) => {
-                    if (y + blockHeight > 270) {
-                        doc.addPage();
-                        y = 20;
-                    }
+    // Limpiar historial
+    const clearHistory = async () => {
+      try {
+        const result = await LoanModel.clearAllData();
+        
+        if (!result.success) {
+          setError(result.error || 'Error al limpiar historial');
+          return { success: false };
+        }
 
-                    // --- 1. DIBUJAR IMAGEN (Intento de Base64 o URL) ---
-                    
-                    // Nota: Si p.imagen NO es Base64, esto fallará por CORS.
-                    try {
-                        if (p.imagen && p.imagen.startsWith('http')) {
-                            // Intentamos añadir la imagen. Si falla, el bloque catch dibujará el error.
-                            // Para Base64, el segundo argumento debe ser el tipo MIME (e.g., 'PNG', 'JPEG')
-                            // Dado que no sabemos el tipo, usamos un simple placeholder en caso de fallo.
-                             doc.addImage(p.imagen, 'JPEG', margin, y, imageWidth, imageHeight);
-                        } else {
-                            doc.rect(margin, y, imageWidth, imageHeight);
-                            doc.text(`[No hay URL]`, margin + 3, y + imageHeight / 2);
-                        }
-                    } catch (e) {
-                         // Dibuja un placeholder si falla la carga por CORS
-                        doc.rect(margin, y, imageWidth, imageHeight);
-                        doc.text(`[Img Falló por CORS]`, margin + 2, y + imageHeight / 2);
-                    }
-                    
-                    const textX = margin + imageWidth + 5;
-                    let textY = y + 5;
+        await loadAllData();
+        return { success: true };
+      } catch (err) {
+        console.error('Error al limpiar historial:', err);
+        return { success: false };
+      }
+    };
 
-                    // --- 2. DIBUJAR TEXTO AL LADO DE LA IMAGEN ---
-                    doc.setFontSize(12);
-                    doc.text(`${p.libro}`, textX, textY);
-                    doc.setFontSize(10);
-                    textY += lineHeight * 2;
-                    
-                    doc.text(`Nombre: ${p.nombre}`, textX, textY); textY += lineHeight;
-                    doc.text(`Domicilio: ${p.domicilio}`, textX, textY); textY += lineHeight;
-                    doc.text(`Teléfono: ${p.telefono}`, textX, textY); textY += lineHeight;
-                    
-                    if (isConcluded) {
-                        doc.text(`Concluido: ${p.fecha_conclusion || 'N/A'}`, textX, textY); textY += lineHeight;
-                    } else {
-                        doc.text(`Fiador: ${p.fiador}`, textX, textY); textY += lineHeight;
-                        doc.text(`Fecha Préstamo: ${p.fecha || 'N/A'}`, textX, textY); textY += lineHeight;
-                    }
-                    doc.text(`Bibliotecario: ${p.autorizadoPor || 'N/A'}`, textX, textY); textY += lineHeight;
-                    
-                    y += blockHeight + 5; // Mover Y para el siguiente bloque
-                });
-            };
+    return {
+      solicitudesPendientes,
+      solicitudesActivas,
+      filteredSolicitudes,
+      concluidos,
+      loading,
+      error,
+      addLoan,
+      acceptLoan,
+      rejectLoan,
+      concludeLoan,
+      editLoan,
+      setFilter,
+      exportarPDF,
+      clearHistory,
+      reloadData: loadAllData
+    };
+  },
 
-            // Generar secciones
-            generateRecords("Préstamos Activos Aceptados", solicitudesAceptadas, false);
-            
-            y += 10; // Espacio extra entre secciones
-            generateRecords("Historial de Préstamos Concluidos", concluidosData, true);
-            
-            doc.save("historial_prestamos.pdf");
-        };
-
-        return {
-            filteredSolicitudes,
-            concluidos,
-            addLoan,
-            acceptLoan,
-            rejectLoan,
-            concludeLoan,
-            setFilter,
-            exportarPDF // Función de PDF actualizada
-        };
-    },
-    filterBookCatalog: filterBookCatalog 
+  filterBookCatalog: filterBookCatalog
 };
 
-export default LoanController;  
+export default LoanController;

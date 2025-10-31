@@ -1,31 +1,70 @@
-// src/views/User/ProfileView.jsx (CÓDIGO COMPLETO Y FINAL)
+// src/views/User/ProfileView.jsx - ACTUALIZADO PARA SUPABASE
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import BookModel from '../../models/BookModel'; // Importa el Modelo
-import BookCard from '../../components/BookCard.jsx'; // Importa el sub-componente
-import '../../styles/GlobalStyles.css'; // Estilos globales
+import BookModel from '../../models/BookModel';
+import AuthController from '../../controllers/AuthController';
+import BookCard from '../../components/BookCard.jsx';
+import '../../styles/GlobalStyles.css';
 
 const ProfileView = () => {
     const [activeSection, setActiveSection] = useState('menu');
+    const [profileData, setProfileData] = useState(null);
+    const [recommendedBooks, setRecommendedBooks] = useState([]);
+    const [libraries, setLibraries] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [currentUser, setCurrentUser] = useState(null);
     const navigate = useNavigate();
 
-    const profileData = BookModel.getProfileData(); 
-    const recommendedBooks = BookModel.getRecommendedBooks();
-    const libraries = BookModel.getLibraries();
+    // Cargar datos al montar el componente
+    useEffect(() => {
+        loadData();
+    }, []);
 
-    // CONTROLADOR: Lógica de cerrar sesión
-    const handleLogout = () => {
-        console.log("Cerrando sesión...");
-        navigate('/login'); 
+    const loadData = async () => {
+        try {
+            setLoading(true);
+
+            // Obtener usuario actual
+            const user = await AuthController.getCurrentUser();
+            
+            if (!user) {
+                // Si no hay usuario, redirigir al login
+                navigate('/login');
+                return;
+            }
+
+            setCurrentUser(user);
+
+            // Cargar datos en paralelo
+            const [profile, books, libs] = await Promise.all([
+                BookModel.getProfileData(user.id),
+                BookModel.getRecommendedBooks(),
+                BookModel.getLibraries()
+            ]);
+
+            setProfileData(profile);
+            setRecommendedBooks(books || []);
+            setLibraries(libs || []);
+        } catch (error) {
+            console.error('Error al cargar datos:', error);
+        } finally {
+            setLoading(false);
+        }
     };
 
-    // VISTA: Componente para las Bibliotecas (reutilizable)
+    // Cerrar sesión
+    const handleLogout = async () => {
+        await AuthController.logout();
+        navigate('/login');
+    };
+
+    // Componente para las Bibliotecas
     const LibrariesSectionContent = () => (
         <>
             <div className="book-grid" style={{ flexWrap: 'wrap', overflowX: 'visible' }}>
                 {libraries.map((lib, index) => (
-                    <div key={index} className="book-card" style={{ flex: '0 0 280px', minWidth: '280px' }}>
+                    <div key={lib.id || index} className="book-card" style={{ flex: '0 0 280px', minWidth: '280px' }}>
                         <img 
                             src={lib.imgUrl} 
                             alt={lib.name} 
@@ -54,8 +93,16 @@ const ProfileView = () => {
         </>
     );
 
-    // VISTA: Función para renderizar el contenido de la sección activa
+    // Renderizar contenido de la sección activa
     const renderSection = () => {
+        if (loading) {
+            return <div style={{ textAlign: 'center', padding: '50px' }}>Cargando...</div>;
+        }
+
+        if (!profileData) {
+            return <div style={{ textAlign: 'center', padding: '50px' }}>Error al cargar el perfil</div>;
+        }
+
         switch (activeSection) {
             case 'menu':
                 return (
@@ -63,7 +110,9 @@ const ProfileView = () => {
                         <h2>Menú Principal</h2>
                         <h3>Recomendados</h3>
                         <div className="book-grid">
-                            {recommendedBooks.map((book, index) => <BookCard key={index} book={book} />)}
+                            {recommendedBooks.map((book) => (
+                                <BookCard key={book.id} book={book} />
+                            ))}
                         </div>
                         
                         <h2 style={{ marginTop: '40px' }}>Bibliotecas Cercanas</h2>
@@ -81,14 +130,11 @@ const ProfileView = () => {
                                 <p><strong>Nombre:</strong> {profileData.fullName}</p>
                                 <p><strong>Ubicación:</strong> {profileData.location}</p>
                                 
-                                {/* CONTENEDOR DE BOTONES ALINEADOS */}
-                                {/* Nota: El margen superior está ahora en el CSS del botón (.edit-profile-btn, .delete-profile-btn) */}
                                 <div style={{ display: 'flex' }}>
                                     <button className="edit-profile-btn">
                                         Editar Perfil
                                     </button>
                                     
-                                    {/* BOTÓN CERRAR SESIÓN: Usando la clase agrupada .delete-profile-btn */}
                                     <button 
                                         className="delete-profile-btn" 
                                         onClick={handleLogout}
@@ -96,12 +142,13 @@ const ProfileView = () => {
                                         Cerrar Sesión
                                     </button>
                                 </div>
-                                
                             </div>
                         </div>
                         <h3>Libros Favoritos</h3>
                         <div className="book-grid">
-                            {recommendedBooks.slice(0, 4).map((book, index) => <BookCard key={index} book={book} />)}
+                            {recommendedBooks.slice(0, 4).map((book) => (
+                                <BookCard key={book.id} book={book} />
+                            ))}
                         </div>
                     </section>
                 );
@@ -113,18 +160,42 @@ const ProfileView = () => {
                     </section>
                 );
             case 'historial':
-                return (<section id="historial"><h2>Historial de Lectura</h2><p>Aquí aparecerán los libros que has leído recientemente.</p></section>);
+                return (
+                    <section id="historial">
+                        <h2>Historial de Lectura</h2>
+                        <p>Aquí aparecerán los libros que has leído recientemente.</p>
+                    </section>
+                );
             case 'apartados':
                 return (
                     <section id="apartados">
                         <h3>Mis Apartados</h3>
                         <div className="book-grid">
-                            <BookCard book={{ title: "Culpa Nuestra", author: "Mercedes Ron", editorial: "Molino", img: "https://gandhi.vtexassets.com/arquivos/ids/6835699-1200-auto?v=638780018406300000&width=1200&height=auto&aspect=true", stars: 3 }} status="Vigente" />
-                            <BookCard book={{ title: "La Biblioteca de la Medianoche", author: "Matt Haig", editorial: "Planeta", img: "https://gandhi.vtexassets.com/arquivos/ids/6247194-1200-auto?v=638610088884470000&width=1200&height=auto&aspect=true", stars: 4 }} status="Expirado" />
+                            <BookCard 
+                                book={{ 
+                                    title: "Culpa Nuestra", 
+                                    author: "Mercedes Ron", 
+                                    editorial: "Molino", 
+                                    img: "https://gandhi.vtexassets.com/arquivos/ids/6835699-1200-auto?v=638780018406300000&width=1200&height=auto&aspect=true", 
+                                    stars: 3 
+                                }} 
+                                status="Vigente" 
+                            />
+                            <BookCard 
+                                book={{ 
+                                    title: "La Biblioteca de la Medianoche", 
+                                    author: "Matt Haig", 
+                                    editorial: "Planeta", 
+                                    img: "https://gandhi.vtexassets.com/arquivos/ids/6247194-1200-auto?v=638610088884470000&width=1200&height=auto&aspect=true", 
+                                    stars: 4 
+                                }} 
+                                status="Expirado" 
+                            />
                         </div>
                     </section>
                 );
-            default: return null;
+            default: 
+                return null;
         }
     };
 
@@ -142,7 +213,6 @@ const ProfileView = () => {
                 
                 <div className="top-nav">
                     <input type="text" className="search-bar" placeholder="¿Qué estás buscando?" />
-                    {/* CONTROLADOR/VISTA: Botones de navegación gestionados por estado */}
                     {['menu', 'bibliotecas', 'historial', 'apartados', 'perfil'].map((section) => (
                         <button
                             key={section}

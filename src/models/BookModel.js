@@ -1,40 +1,244 @@
-// src/models/BookModel.js (CÓDIGO COMPLETO)
+// src/models/BookModel.js - MIGRADO A SUPABASE
+import { supabase, handleSupabaseError } from '../config/supabaseClient';
 
 const BookModel = {
-    getProfileData: () => ({
-        name: "Iván Díaz",
-        email: "ivangilberto04@hotmail.com.com",
-        fullName: "Iván Gilberto Díaz Sonoqui",
-        location: "-",
-        photo: "https://cdn.pixabay.com/photo/2023/02/18/11/00/icon-7797704_1280.png"
-    }),
+  // Obtener datos del perfil (ahora desde Supabase)
+  getProfileData: async (userId) => {
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('full_name, email, location, photo_url')
+        .eq('id', userId)
+        .single();
 
-    getLibraries: () => [
-        { 
-            name: "Biblioteca Fortino León Almada", 
-            address: "C. Guerrero, Centro, 83000 Hermosillo, Son.", 
-            phone: "662 217 0691", 
-            imgUrl: '/Librerias/Fortino León Almada.webp'
-        },
-        { 
-            name: "Biblioteca Rafael Meneses", 
-            address: "Av Tabasco 4-5, Modelo, 83190 Hermosillo, Son.", 
-            phone: "-", 
-            imgUrl: '/Librerias/Rafael Meneses.webp'
-        },
-    ],
+      if (error) return handleSupabaseError(error);
 
-    // Catálogo de Libros (Actualizado con ISBNs para la búsqueda)
-    getRecommendedBooks: () => [
-        { title: "Culpa Nuestra", author: "Mercedes Ron", editorial: "Molino", img: "https://gandhi.vtexassets.com/arquivos/ids/6835699-1200-auto?v=638780018406300000&width=1200&height=auto&aspect=true", badge: "Los más leídos", stars: 3, link: "1.html", isbn: "9786075740010" },
-        { title: "En Agosto Nos Vemos", author: "Gabriel García Márquez", editorial: "Planeta", img: "https://gandhi.vtexassets.com/arquivos/ids/4614852-1200-auto?v=638574589263170000&width=1200&height=auto&aspect=true", badge: "Recomendados", stars: 4, link: "2.html", isbn: "9788439743071" },
-        { title: "Caída Libre", author: "Ali Hazelwood", editorial: "Planeta", img: "https://gandhi.vtexassets.com/arquivos/ids/1817481-1200-auto?v=638585715644300000&width=1200&height=auto&aspect=true", badge: "Recomendados", stars: 4, link: "3.html", isbn: "9788419822543" },
-        { title: "No estás en la lista", author: "Alison Espach", editorial: "VR", img: "https://gandhi.vtexassets.com/arquivos/ids/1799826-1200-auto?v=638491751435830000&width=1200&height=auto&aspect=true", badge: "Recomendados", stars: 3, link: "4.html", isbn: "9786313003341" },
-        { title: "Al final mueren los dos", author: "Adam Silvera", editorial: "Planeta", img: "https://gandhi.vtexassets.com/arquivos/ids/1978915-1200-auto?v=638429277040630000&width=1200&height=auto&aspect=true", badge: "Recomendados", stars: 4, link: "5.html", isbn: "9788496886704" },
-        { title: "La canción de Aquiles", author: "Madeline Miller", editorial: "VR", img: "https://gandhi.vtexassets.com/arquivos/ids/6247194-1200-auto?v=638610088884470000&width=1200&height=auto&aspect=true", badge: "Recomendados", stars: 3, link: "6.html", isbn: "9788413622132" },
-        { title: "La Biblioteca de la Medianoche", author: "Matt Haig", editorial: "AdN", img: "https://gandhi.vtexassets.com/arquivos/ids/6808984-1200-auto?v=638737628486530000&width=1200&height=auto&aspect=true", badge: "Recomendados", stars: 3, link: "7.html", isbn: "9786075507712" },
-        { title: "Heartless", author: "Marissa Meyer", editorial: "VR", img: "https://gandhi.vtexassets.com/arquivos/ids/6619499-1200-auto?v=638658253845130000&width=1200&height=auto&aspect=true", badge: "Recomendados", stars: 3, link: "8.html", isbn: "9786313002979" },
-    ],
+      return {
+        name: data.full_name.split(' ')[0], // Primer nombre
+        email: data.email,
+        fullName: data.full_name,
+        location: data.location || '-',
+        photo: data.photo_url
+      };
+    } catch (error) {
+      console.error('Error al obtener perfil:', error);
+      return null;
+    }
+  },
+
+  // Obtener todas las bibliotecas
+  getLibraries: async () => {
+    try {
+      const { data, error } = await supabase
+        .from('libraries')
+        .select('*')
+        .order('name');
+
+      if (error) return handleSupabaseError(error);
+
+      return data.map(lib => ({
+        id: lib.id,
+        name: lib.name,
+        address: lib.address,
+        phone: lib.phone,
+        imgUrl: lib.img_url
+      }));
+    } catch (error) {
+      console.error('Error al obtener bibliotecas:', error);
+      return [];
+    }
+  },
+
+  // Obtener libros recomendados
+  getRecommendedBooks: async () => {
+    try {
+      const { data, error } = await supabase
+        .from('books')
+        .select('*')
+        .eq('available', true)
+        .order('stars', { ascending: false })
+        .limit(8);
+
+      if (error) return handleSupabaseError(error);
+
+      return data.map(book => ({
+        id: book.id,
+        title: book.title,
+        author: book.author,
+        editorial: book.editorial,
+        img: book.img_url,
+        badge: book.badge,
+        stars: book.stars,
+        isbn: book.isbn,
+        available: book.available
+      }));
+    } catch (error) {
+      console.error('Error al obtener libros:', error);
+      return [];
+    }
+  },
+
+  // Buscar libros por término de búsqueda
+  searchBooks: async (searchTerm) => {
+    try {
+      const { data, error } = await supabase
+        .from('books')
+        .select('*')
+        .or(`title.ilike.%${searchTerm}%,author.ilike.%${searchTerm}%,isbn.ilike.%${searchTerm}%`)
+        .eq('available', true);
+
+      if (error) return handleSupabaseError(error);
+
+      return data.map(book => ({
+        id: book.id,
+        title: book.title,
+        author: book.author,
+        editorial: book.editorial,
+        img: book.img_url,
+        badge: book.badge,
+        stars: book.stars,
+        isbn: book.isbn,
+        available: book.available
+      }));
+    } catch (error) {
+      console.error('Error al buscar libros:', error);
+      return [];
+    }
+  },
+
+  // Obtener un libro por ID
+  getBookById: async (bookId) => {
+    try {
+      const { data, error } = await supabase
+        .from('books')
+        .select('*')
+        .eq('id', bookId)
+        .single();
+
+      if (error) return handleSupabaseError(error);
+
+      return {
+        id: data.id,
+        title: data.title,
+        author: data.author,
+        editorial: data.editorial,
+        img: data.img_url,
+        badge: data.badge,
+        stars: data.stars,
+        isbn: data.isbn,
+        available: data.available
+      };
+    } catch (error) {
+      console.error('Error al obtener libro:', error);
+      return null;
+    }
+  },
+
+  // Crear un nuevo libro (solo bibliotecarios)
+  createBook: async (bookData) => {
+    try {
+      const { data, error } = await supabase
+        .from('books')
+        .insert([{
+          title: bookData.title,
+          author: bookData.author,
+          editorial: bookData.editorial,
+          isbn: bookData.isbn,
+          img_url: bookData.img,
+          badge: bookData.badge || 'Nuevo',
+          stars: bookData.stars || 0,
+          available: true
+        }])
+        .select()
+        .single();
+
+      if (error) return handleSupabaseError(error);
+
+      return { success: true, data };
+    } catch (error) {
+      console.error('Error al crear libro:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // Actualizar un libro (solo bibliotecarios)
+  updateBook: async (bookId, updates) => {
+    try {
+      const { data, error } = await supabase
+        .from('books')
+        .update({
+          title: updates.title,
+          author: updates.author,
+          editorial: updates.editorial,
+          isbn: updates.isbn,
+          img_url: updates.img,
+          badge: updates.badge,
+          stars: updates.stars,
+          available: updates.available
+        })
+        .eq('id', bookId)
+        .select()
+        .single();
+
+      if (error) return handleSupabaseError(error);
+
+      return { success: true, data };
+    } catch (error) {
+      console.error('Error al actualizar libro:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // Eliminar un libro (solo bibliotecarios)
+  deleteBook: async (bookId) => {
+    try {
+      const { error } = await supabase
+        .from('books')
+        .delete()
+        .eq('id', bookId);
+
+      if (error) return handleSupabaseError(error);
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error al eliminar libro:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // Marcar libro como no disponible
+  markAsUnavailable: async (bookId) => {
+    try {
+      const { error } = await supabase
+        .from('books')
+        .update({ available: false })
+        .eq('id', bookId);
+
+      if (error) return handleSupabaseError(error);
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error al marcar libro como no disponible:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  // Marcar libro como disponible
+  markAsAvailable: async (bookId) => {
+    try {
+      const { error } = await supabase
+        .from('books')
+        .update({ available: true })
+        .eq('id', bookId);
+
+      if (error) return handleSupabaseError(error);
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error al marcar libro como disponible:', error);
+      return { success: false, error: error.message };
+    }
+  }
 };
 
 export default BookModel;

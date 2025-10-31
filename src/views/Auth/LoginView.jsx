@@ -13,15 +13,19 @@ const LoginView = ({ role = 'user' }) => {
     const navigate = useNavigate();
 
     // VISTA: Captura el evento y lo pasa al Controlador
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
         
         // Llama al Controlador para verificar la autenticación
-        const result = AuthController.handleLogin(email, password); 
+        const result = await AuthController.login(email, password); 
 
         if (result.success) {
-            // El Controlador nos dice a dónde ir según el rol autenticado
-            navigate(result.redirectPath); 
+            // Redirigir según el rol del usuario
+            if (result.user.role === 'librarian') {
+                navigate('/librarian/dashboard');
+            } else {
+                navigate('/user/profile');
+            }
         } else {
             alert(result.message);
         }
